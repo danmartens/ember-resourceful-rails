@@ -16,6 +16,9 @@ Resourceful.Resource = Ember.Object.extend({
   isFetching: false,
   isFetched: false,
   isSaving: false,
+  isDeleting: false,
+  isDeleted: false,
+
 
   init: function() {
     var _this = this;
@@ -41,7 +44,7 @@ Resourceful.Resource = Ember.Object.extend({
   },
 
   isNew: Ember.computed.equal('id', undefined),
-  
+
   isDirty: Ember.computed.bool('dirtyProperties.length'),
 
   serialize: function() {
@@ -90,7 +93,7 @@ Resourceful.Resource = Ember.Object.extend({
     return this;
   },
 
-  fetch: function(options) {
+  fetchResource: function(options) {
     var _this = this;
 
     this.set('isFetching', true);
@@ -107,12 +110,13 @@ Resourceful.Resource = Ember.Object.extend({
       .done(function(data, textStatus, jqXHR) {
         _this.deserialize(data);
         _this._updatePersistedProperties();
-
+      })
+      .always(function() {
         _this.set('isFetching', false);
       });
   },
 
-  save: function(options) {
+  saveResource: function(options) {
     var success, method, _this = this;
 
     this.set('isSaving', true);
@@ -140,7 +144,11 @@ Resourceful.Resource = Ember.Object.extend({
       });
   },
 
-  destroy: function(options) {
+  deleteResource: function(options) {
+    var _this = this;
+
+    this.set('isDeleting', true);
+
     if (!options) {
       options = {};
     }
@@ -149,7 +157,13 @@ Resourceful.Resource = Ember.Object.extend({
       options.url = this._resourceUrl();
     }
 
-    return this.resourceAdapter.request('delete', options);
+    return this.resourceAdapter.request('delete', options)
+      .done(function() {
+        _this.set('isDeleted', true);
+      })
+      .always(function() {
+        _this.set('isDeleting', false);
+      });
   },
 
   revert: function(key) {
@@ -161,7 +175,7 @@ Resourceful.Resource = Ember.Object.extend({
     var _this = this;
 
     Ember.beginPropertyChanges(this);
-    
+
     this.dirtyProperties.forEach(function(key) {
       _this.set(key, _this.persistedProperties[key]);
     });
@@ -274,7 +288,7 @@ Resourceful.ResourceCollection = Ember.ArrayProxy.extend({
     if (!resource) {
       resource = this.resourceClass.create({ id: id });
 
-      resource.fetch();
+      resource.fetchResource();
 
       this.pushObject(resource);
     }
@@ -291,15 +305,14 @@ Resourceful.ResourceCollection = Ember.ArrayProxy.extend({
 
     resource = this.resourceClass.create({ id: id });
 
-    return resource.fetch(options)
+    return resource.fetchResource(options)
       .done(function() {
         _this.pushObject(resource);
       });
   },
 
   fetchAll: function(options) {
-    var success,
-      _this = this;
+    var success, _this = this;
 
     this.set('isFetching', true);
 
@@ -313,8 +326,6 @@ Resourceful.ResourceCollection = Ember.ArrayProxy.extend({
 
     return this.resourceAdapter.request('read', options)
       .done(function(data, textStatus, jqXHR) {
-        _this.content.clear();
-        _this._resourceIndex = {};
         _this.loadAll(data);
         _this.set('isFetching', false);
         _this.set('isFetched', true);
@@ -336,12 +347,13 @@ Resourceful.ResourceCollection = Ember.ArrayProxy.extend({
 
     if (!resource) {
       resource = this.resourceClass.create();
-      this.pushObject(resource);
     }
 
     resource.deserialize(json);
 
-    resource._updatePersistedProperties();
+    if (!this.contains(resource)) {
+      this.pushObject(resource);
+    }
   },
 
   _resourceUrl: function() {
@@ -389,14 +401,14 @@ Resourceful.ResourceAdapter = Ember.Object.extend({
 
     return deferred;
   },
-  
+
   buildURI: function(parts) {
     if (arguments.length > 1) {
       parts = slice.call(arguments, 0)
     } else if (typeof parts === 'string') {
       parts = [parts];
     }
-    
+
     return encodeURI((this.namespace + '/' + parts.join('/')).replace(/\/+/g, '/'));
   },
 
